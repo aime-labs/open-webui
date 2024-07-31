@@ -37,6 +37,7 @@
 	} from '$lib/utils';
 
 	import { generateChatCompletion } from '$lib/apis/ollama';
+	import { generateAIMEChatCompletion } from '$lib/apis/aime';
 	import {
 		addTagById,
 		createNewChat,
@@ -686,6 +687,8 @@
 					let _response = null;
 					if (model?.owned_by === 'openai') {
 						_response = await sendPromptOpenAI(model, prompt, responseMessageId, _chatId);
+					} else if (model?.owned_by === 'aime') {
+						_response = await sendPromptAIME(model, prompt, responseMessageId, _chatId);
 					} else if (model) {
 						_response = await sendPromptOllama(model, prompt, responseMessageId, _chatId);
 					}
@@ -702,7 +705,7 @@
 		return _responses;
 	};
 
-	const sendPromptOllama = async (model, userPrompt, responseMessageId, _chatId) => {
+	const sendPromptAIME = async (model, userPrompt, responseMessageId, _chatId) => {
 		let _response = null;
 
 		const responseMessage = history.messages[responseMessageId];
@@ -787,7 +790,304 @@
 		);
 
 		await tick();
+		const [res, controller] = await generateAIMEChatCompletion(localStorage.token, {
+			stream: true,
+			model: model.id,
+			messages: messagesBody,
+			options: {
+				...($settings.params ?? {}),
+				...(params ?? {}),
+				stop:
+					params?.stop ?? $settings?.params?.stop ?? undefined
+						? (params?.stop ?? $settings.params.stop).map((str) =>
+								decodeURIComponent(JSON.parse('"' + str.replace(/\"/g, '\\"') + '"'))
+						  )
+						: undefined,
+				num_predict: params?.max_tokens ?? $settings?.params?.max_tokens ?? undefined,
+				repeat_penalty:
+					params?.frequency_penalty ?? $settings?.params?.frequency_penalty ?? undefined
+			},
+			format: $settings.requestFormat ?? undefined,
+			keep_alive: $settings.keepAlive ?? undefined,
+			tool_ids: selectedToolIds.length > 0 ? selectedToolIds : undefined,
+			files: files.length > 0 ? files : undefined,
+			...(Object.keys(valves).length ? { valves } : {}),
+			session_id: $socket?.id,
+			chat_id: $chatId,
+			id: responseMessageId
+		});
 
+		if (res && res.ok) {
+			const reader = res.body
+				.pipeThrough(new TextDecoderStream())
+				.pipeThrough(splitStream('\n'))
+				.getReader();
+
+			while (true) {
+				const { value, done } = await reader.read();
+				if (done || stopResponseFlag || _chatId !== $chatId) {
+					responseMessage.done = true;
+					messages = messages;
+
+					if (stopResponseFlag) {
+						controller.abort('User: Stop Response');
+					} else {
+						const messages = createMessagesList(responseMessageId);
+						await chatCompletedHandler(_chatId, model.id, responseMessageId, messages);
+					}
+
+					_response = responseMessage.content;
+					break;
+				}
+				try {
+					let lines = value.split('\n');
+
+					for (const line of lines) {
+						if (line !== '') {
+							let data = JSON.parse(line);
+
+							if ('citations' in data) {
+								responseMessage.citations = data.citations;
+								continue;
+							}
+
+							if ('detail' in data) {
+								throw data;
+							}
+
+							if (data.done == false) {
+								if (responseMessage.content == '' && data.message.content == '\n') {
+									continue;
+								} else {
+									responseMessage.content += data.message.content;
+
+									const sentences = extractSentencesForAudio(responseMessage.content);
+									sentences.pop();
+
+									// dispatch only last sentence and make sure it hasn't been dispatched before
+									if (
+										sentences.length > 0 &&
+										sentences[sentences.length - 1] !== responseMessage.lastSentence
+									) {
+										responseMessage.lastSentence = sentences[sentences.length - 1];
+										eventTarget.dispatchEvent(
+											new CustomEvent('chat', {
+												detail: { id: responseMessageId, content: sentences[sentences.length - 1] }
+											})
+										);
+									}
+
+									messages = messages;
+								}
+							} else {
+								responseMessage.done = true;
+
+								if (responseMessage.content == '') {
+									responseMessage.error = {
+										code: 400,
+										content: `Oops! No text generated from Ollama, Please try again.`
+									};
+								}
+
+								responseMessage.context = data.context ?? null;
+								responseMessage.info = {
+									total_duration: data.total_duration,
+									load_duration: data.load_duration,
+									sample_count: data.sample_count,
+									sample_duration: data.sample_duration,
+									prompt_eval_count: data.prompt_eval_count,
+									prompt_eval_duration: data.prompt_eval_duration,
+									eval_count: data.eval_count,
+									eval_duration: data.eval_duration
+								};
+								messages = messages;
+
+								if ($settings.notificationEnabled && !document.hasFocus()) {
+									const notification = new Notification(`${model.id}`, {
+										body: responseMessage.content,
+										icon: `${WEBUI_BASE_URL}/static/favicon.png`
+									});
+								}
+
+								if ($settings?.responseAutoCopy ?? false) {
+									copyToClipboard(responseMessage.content);
+								}
+
+								if ($settings.responseAutoPlayback && !$showCallOverlay) {
+									await tick();
+									document.getElementById(`speak-button-${responseMessage.id}`)?.click();
+								}
+							}
+						}
+					}
+				} catch (error) {
+					console.log(error);
+					if ('detail' in error) {
+						toast.error(error.detail);
+					}
+					break;
+				}
+
+				if (autoScroll) {
+					scrollToBottom();
+				}
+			}
+
+			if ($chatId == _chatId) {
+				if ($settings.saveChatHistory ?? true) {
+					chat = await updateChatById(localStorage.token, _chatId, {
+						messages: messages,
+						history: history,
+						models: selectedModels,
+						params: params,
+						files: chatFiles
+					});
+					await chats.set(await getChatList(localStorage.token));
+				}
+			}
+		} else {
+			if (res !== null) {
+				const error = await res.json();
+				console.log(error);
+				if ('detail' in error) {
+					toast.error(error.detail);
+					responseMessage.error = { content: error.detail };
+				} else {
+					toast.error(error.error);
+					responseMessage.error = { content: error.error };
+				}
+			} else {
+				toast.error(
+					$i18n.t(`Uh-oh! There was an issue connecting to {{provider}}.`, { provider: 'Ollama' })
+				);
+				responseMessage.error = {
+					content: $i18n.t(`Uh-oh! There was an issue connecting to {{provider}}.`, {
+						provider: 'Ollama'
+					})
+				};
+			}
+			responseMessage.done = true;
+			messages = messages;
+		}
+
+		stopResponseFlag = false;
+		await tick();
+
+		let lastSentence = extractSentencesForAudio(responseMessage.content)?.at(-1) ?? '';
+		if (lastSentence) {
+			eventTarget.dispatchEvent(
+				new CustomEvent('chat', {
+					detail: { id: responseMessageId, content: lastSentence }
+				})
+			);
+		}
+		eventTarget.dispatchEvent(
+			new CustomEvent('chat:finish', {
+				detail: {
+					id: responseMessageId,
+					content: responseMessage.content
+				}
+			})
+		);
+
+		if (autoScroll) {
+			scrollToBottom();
+		}
+
+		if (messages.length == 2 && messages.at(1).content !== '' && selectedModels[0] === model.id) {
+			window.history.replaceState(history.state, '', `/c/${_chatId}`);
+			const _title = await generateChatTitle(userPrompt);
+			await setChatTitle(_chatId, _title);
+		}
+
+		return _response;
+	};
+
+
+	const sendPromptOllama = async (model, userPrompt, responseMessageId, _chatId) => {
+		let _response = null;
+		const responseMessage = history.messages[responseMessageId];
+
+		// Wait until history/message have been updated
+		await tick();
+
+		// Scroll down
+		scrollToBottom();
+
+		const messagesBody = [
+			params?.system || $settings.system || (responseMessage?.userContext ?? null)
+				? {
+						role: 'system',
+						content: `${promptTemplate(
+							params?.system ?? $settings?.system ?? '',
+							$user.name,
+							$settings?.userLocation
+								? await getAndUpdateUserLocation(localStorage.token)
+								: undefined
+						)}${
+							responseMessage?.userContext ?? null
+								? `\n\nUser Context:\n${responseMessage?.userContext ?? ''}`
+								: ''
+						}`
+				  }
+				: undefined,
+			...messages
+		]
+			.filter((message) => message?.content?.trim())
+			.map((message, idx, arr) => {
+				// Prepare the base message object
+				const baseMessage = {
+					role: message.role,
+					content: message.content
+				};
+
+				// Extract and format image URLs if any exist
+				const imageUrls = message.files
+					?.filter((file) => file.type === 'image')
+					.map((file) => file.url.slice(file.url.indexOf(',') + 1));
+
+				// Add images array only if it contains elements
+				if (imageUrls && imageUrls.length > 0 && message.role === 'user') {
+					baseMessage.images = imageUrls;
+				}
+				return baseMessage;
+			});
+
+		let lastImageIndex = -1;
+
+		// Find the index of the last object with images
+		messagesBody.forEach((item, index) => {
+			if (item.images) {
+				lastImageIndex = index;
+			}
+		});
+
+		// Remove images from all but the last one
+		messagesBody.forEach((item, index) => {
+			if (index !== lastImageIndex) {
+				delete item.images;
+			}
+		});
+
+		let files = JSON.parse(JSON.stringify(chatFiles));
+		if (model?.info?.meta?.knowledge ?? false) {
+			files.push(...model.info.meta.knowledge);
+		}
+		if (responseMessage?.files) {
+			files.push(
+				...responseMessage?.files.filter((item) => ['web_search_results'].includes(item.type))
+			);
+		}
+
+		eventTarget.dispatchEvent(
+			new CustomEvent('chat:start', {
+				detail: {
+					id: responseMessageId
+				}
+			})
+		);
+
+		await tick();
 		const [res, controller] = await generateChatCompletion(localStorage.token, {
 			stream: true,
 			model: model.id,

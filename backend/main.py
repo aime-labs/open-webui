@@ -41,6 +41,13 @@ from apps.openai.main import (
     generate_chat_completion as generate_openai_chat_completion,
 )
 
+from apps.aime.main import (
+    app as aime_app,
+    get_all_models as get_aime_models,
+    generate_title as generate_aime_chat_completion,
+)
+
+
 from apps.audio.main import app as audio_app
 from apps.images.main import app as images_app
 from apps.rag.main import app as rag_app
@@ -97,6 +104,7 @@ from config import (
     DEFAULT_LOCALE,
     ENABLE_OPENAI_API,
     ENABLE_OLLAMA_API,
+    ENABLE_AIME_API,
     ENABLE_MODEL_FILTER,
     MODEL_FILTER_LIST,
     GLOBAL_LOG_LEVEL,
@@ -186,6 +194,7 @@ app.state.config = AppConfig()
 
 app.state.config.ENABLE_OPENAI_API = ENABLE_OPENAI_API
 app.state.config.ENABLE_OLLAMA_API = ENABLE_OLLAMA_API
+app.state.config.ENABLE_AIME_API = ENABLE_AIME_API
 
 app.state.config.ENABLE_MODEL_FILTER = ENABLE_MODEL_FILTER
 app.state.config.MODEL_FILTER_LIST = MODEL_FILTER_LIST
@@ -606,7 +615,7 @@ class ChatCompletionMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         if request.method == "POST" and any(
             endpoint in request.url.path
-            for endpoint in ["/ollama/api/chat", "/chat/completions"]
+            for endpoint in ["/ollama/api/chat", "/chat/completions", "/aime/api/chat"]
         ):
             log.debug(f"request.url.path: {request.url.path}")
 
@@ -922,6 +931,7 @@ app.mount("/ws", socket_app)
 
 app.mount("/ollama", ollama_app)
 app.mount("/openai", openai_app)
+app.mount("/aime", aime_app)
 
 app.mount("/images/api/v1", images_app)
 app.mount("/audio/api/v1", audio_app)
@@ -937,6 +947,7 @@ async def get_all_models():
     pipe_models = []
     openai_models = []
     ollama_models = []
+    aime_models = []
 
     pipe_models = await get_pipe_models()
 
@@ -958,8 +969,21 @@ async def get_all_models():
             for model in ollama_models["models"]
         ]
 
-    models = pipe_models + openai_models + ollama_models
+    if app.state.config.ENABLE_AIME_API:
 
+        aime_models = await get_aime_models()
+        aime_models = [
+            {
+                "id": model["model"],
+                "name": model["name"],
+                "object": "model",
+                "created": int(time.time()),
+                "owned_by": "aime",
+            }
+            for model in aime_models["models"]
+        ]
+
+    models = pipe_models + openai_models + ollama_models + aime_models
     global_action_ids = [
         function.id for function in Functions.get_global_action_functions()
     ]
@@ -1108,6 +1132,9 @@ async def generate_chat_completions(form_data: dict, user=Depends(get_verified_u
     if model["owned_by"] == "ollama":
         print("generate_ollama_chat_completion")
         return await generate_ollama_chat_completion(form_data, user=user)
+    elif model["owned_by"] == "aime":
+        print("generate_aime_chat_completion")
+        return await generate_aime_chat_completion(form_data, user=user)
     else:
         return await generate_openai_chat_completion(form_data, user=user)
 

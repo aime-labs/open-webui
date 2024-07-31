@@ -603,6 +603,7 @@ OLLAMA_API_BASE_URL = os.environ.get(
 )
 
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "")
+
 AIOHTTP_CLIENT_TIMEOUT = os.environ.get("AIOHTTP_CLIENT_TIMEOUT", "")
 
 if AIOHTTP_CLIENT_TIMEOUT == "":
@@ -642,6 +643,52 @@ OLLAMA_BASE_URLS = OLLAMA_BASE_URLS if OLLAMA_BASE_URLS != "" else OLLAMA_BASE_U
 OLLAMA_BASE_URLS = [url.strip() for url in OLLAMA_BASE_URLS.split(";")]
 OLLAMA_BASE_URLS = PersistentConfig(
     "OLLAMA_BASE_URLS", "ollama.base_urls", OLLAMA_BASE_URLS
+)
+
+
+####################################
+# AIME API Server
+####################################
+
+
+
+ENABLE_AIME_API = PersistentConfig(
+    "ENABLE_AIME_API",
+    "aime.enable",
+    os.environ.get("ENABLE_AIME_API", "True").lower() == "true",
+)
+
+AIME_API_USER = os.environ.get("AIME_API_USER", "")
+AIME_API_USERS = os.environ.get("AIME_API_USERS", AIME_API_USER)
+
+AIME_API_USERS = [user.strip() for user in AIME_API_USERS.split(";")]
+AIME_API_USERS = PersistentConfig(
+    "AIME_API_USERS", "aime.api_users", AIME_API_USERS
+)
+
+AIME_API_KEY = os.environ.get("AIME_API_KEY", "")
+AIME_API_KEYS = os.environ.get("AIME_API_KEYS", AIME_API_KEY)
+
+AIME_API_KEYS = [key.strip() for key in AIME_API_KEYS.split(";")]
+AIME_API_KEYS = PersistentConfig(
+    "AIME_API_KEYS", "aime.api_keys", AIME_API_KEYS
+)
+
+AIME_BASE_URL = os.environ.get(
+    "AIME_API_BASE_URL", "aime"
+)
+
+AIME_API_BASE_URL = os.environ.get("AIME_API_BASE_URL", "http://localhost:7777")
+
+AIME_API_BASE_URLS = os.environ.get("AIME_API_BASE_URLS", AIME_API_BASE_URL)
+
+AIME_API_BASE_URLS = [
+    url.strip() if url != "" else "http://localhost:7777"
+    for url in AIME_API_BASE_URLS.split(";")
+]
+
+AIME_API_BASE_URLS = PersistentConfig(
+    "AIME_API_BASE_URLS", "aime.api_base_urls", AIME_API_BASE_URLS
 )
 
 ####################################
