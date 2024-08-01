@@ -57,6 +57,101 @@ Want to learn more about Open WebUI's features? Check out our [Open WebUI docume
 
 Don't forget to explore our sibling project, [Open WebUI Community](https://openwebui.com/), where you can discover, download, and explore customized Modelfiles. Open WebUI Community offers a wide range of exciting possibilities for enhancing your chat interactions with Open WebUI! 🚀
 
+## AIME: How to install without docker:
+
+Clone the repo:
+
+```bash
+    cd /your/desired/destination
+    git clone https://github.com/aime-labs/open-webui/
+```
+
+Create virtual environment and activate it:
+
+```bash
+    cd /your/desired/destination/open-webui/backend
+    python3 -m venv venv
+    source /your/desired/destination/open-webui/backend/venv/bin/activate
+```
+
+Install requirements in virtual environment:
+
+pip install -r requirements.txt
+
+### Building Frontend Using Node
+If not installed, install mpm with:
+
+```bash
+    sudo apt install npm
+```
+
+Update node to version >=14:
+
+```bash
+    sudo npm install -g n
+    sudo n lts
+```
+
+Start new shell or reset the location hash with:
+
+```bash
+    hash -r
+```
+
+Check node version with:
+
+```bash
+    node -v
+```
+
+Navigate to the 
+
+```bash
+    cd /your/desired/destination/open-webui
+    npm install
+    npm run build
+```
+
+
+
+### Copying required .env file
+
+```bash
+    cp -RPp /your/desired/destination/open-webui/.env.example /your/desired/destination/open-webui/.env
+```
+
+### Run open-webui backend
+If not active, activate the virtual environment:
+
+```bash
+    source /your/desired/destination/open-webui/backend/venv/bin/activate
+```
+
+To use non-default host (`http://localhost`) and port (`8080`), run the following command before starting the backend:
+
+```bash
+    export HOST = <your_desired_host>
+    export PORT = <your_desired_port>   
+```
+
+Or add the following lines to `/your/desired/destination/open-webui/.env` to set the host and port permanently:
+
+```bash
+    HOST = <your_desired_host>
+    PORT = <your_desired_port>   
+```
+
+Start the backend with:
+
+```bash
+    bash /your/desired/destination/open-webui/backend/start.sh
+```
+
+Now Open-Webui is availabe at the address `<your_desired_host>:<your_desired_port>`
+
+
+
+
 ## How to Install 🚀
 
 > [!NOTE]  
