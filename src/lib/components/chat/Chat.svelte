@@ -1640,6 +1640,13 @@
 						responseMessage.id,
 						_chatId
 					);
+				} else if (model?.owned_by === 'aime') {
+					await sendPromptAIME(
+						model,
+						history.messages[responseMessage.parentId].content,
+						responseMessage.id,
+						_chatId
+					);
 				} else
 					await sendPromptOllama(
 						model,

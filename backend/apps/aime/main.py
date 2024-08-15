@@ -113,6 +113,7 @@ async def get_status():
 @app.get("/api/login/{url_idx}")
 async def aime_api_login(url_idx: Optional[int] = None):
     url_idx = 0 if url_idx is None else url_idx
+    global model_api
     model_api.api_server = app.state.config.AIME_API_BASE_URLS[url_idx]
     try:
         key = await model_api.do_api_login_async(
@@ -733,26 +734,24 @@ async def generate_chat_completion(
                 status_code=400,
                 detail=ERROR_MESSAGES.MODEL_NOT_FOUND(form_data.model),
             )
-
     aime_payload = get_aime_api_payload(payload)
     session = aiohttp.ClientSession(
         trust_env=True, timeout=aiohttp.ClientTimeout(total=AIOHTTP_CLIENT_TIMEOUT)
     )
+    global model_api
     if model_api.endpoint_name != payload.get('model') or model_api.client_session_auth_key is None:
         model_api.endpoint_name = payload.get('model')
-        await model_api.do_api_login_async(
-            user=app.state.config.AIME_API_USERS[url_idx],
-            key=app.state.config.AIME_API_KEYS[url_idx]
-        )
+
+    await aime_api_login(url_idx)
+    model_api.endpoint_name = payload.get('model')
+    
     if payload.get('stream', False):
-        model_api.endpoint_name = payload.get('model')
         aime_response_handler = AIMEResponseHandler(model_api.endpoint_name)
         response = asyncio.create_task(model_api.do_api_request_async(
             aime_payload, 
             progress_callback=aime_response_handler.progress_callback,
             result_callback=aime_response_handler.result_callback
-            ))
-        
+        ))
         header = {
             'Content-Type': 'application/x-ndjson', 
             'Date': datetime.utcnow().strftime('%a, %d %b %Y %H:%M:%S GMT'), 
@@ -766,9 +765,7 @@ async def generate_chat_completion(
             )
         )
     else:
-
         response = await model_api.do_api_request_async(aime_payload)
-
         return JSONResponse(
             {
                 'model': payload.get('model'),
@@ -788,11 +785,15 @@ async def generate_chat_completion(
         )
         
 def get_aime_api_payload(payload):
+    
+    aime_payload = {'prompt_input': payload.get('messages').pop().get('content')} if payload.get('messages', [''])[-1].get('role') == 'user' else {}
+    if not payload.get('messages'):
+        payload['messages'] = [{
+            'role': 'system',
+            'content': ''
+        }]
+    aime_payload['chat_context'] = json.dumps(payload.get('messages'))
 
-    aime_payload = {
-        'prompt_input': payload.get('messages').pop().get('content'),
-        'chat_context': json.dumps(payload.get('messages'))
-    }
     valid_parameters = [ 'top_k', 'top_p', 'temperature', 'seed']
     for param_name, param_value in payload.get('options', {}).items():
         if param_name in valid_parameters:
